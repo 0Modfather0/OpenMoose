@@ -18,3 +18,13 @@ Use your DiCE cable to flash your car. No paywall, no licenses, no encrypted bin
 A proper website and fully-functional software with many more features will be announced soon. IT WILL ALWAYS BE FREE.
 
 Fresh builds are dropped randomly in the Volvo Me7 thread on nefmoto
+
+## Building on Linux
+
+This is a legacy .NET Framework 4.6.1 WinForms app, so build it with Mono:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y mono-devel
+./build.sh
+```
