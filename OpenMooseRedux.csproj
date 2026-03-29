@@ -86,10 +86,8 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Properties\moose.jpg" />
     <Content Include="mooseicon.ico" />
     <None Include="Resources\moose.jpg" />
-    <None Include="Resources\moosepic.bmp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />

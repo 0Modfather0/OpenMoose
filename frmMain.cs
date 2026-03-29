@@ -35,6 +35,7 @@ namespace J2534
     private ECUProgrammer eProg;
     private bool flash512;
     private bool p80;
+    private readonly object progressStateLock = new object();
     private long logTime;
     private ECULogger logger;
     private int numLogSessions;
@@ -128,7 +129,7 @@ namespace J2534
               if (!volvoChecksumUpdater.updateChecksums(false))
               {
                 int num2 = (int) MessageBox.Show("Unknown error updating checksums!", Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Hand);
-                Environment.Exit(3);
+                return;
               }
               else
               {
@@ -161,7 +162,7 @@ namespace J2534
     private void flashTimer_Tick(object sender, EventArgs e)
     {
       this.lblTime.Text = "Flash Time: " + this.flashTime.ToString();
-      lock (new object())
+      lock (this.progressStateLock)
       {
         this.progressFlash.Value = this.flashTime > this.progressFlash.Maximum ? this.progressFlash.Maximum : this.flashTime;
         if (this.eProg.doneFlashing)
@@ -293,16 +294,22 @@ namespace J2534
 
     private void cmdStopLogging_Click(object sender, EventArgs e)
     {
-      this.dice.sendMsg(new CANPacket(ECULoggingCommands.msgCANRequestRecordSetStop), CANChannel.HS);
-      if (this.logger.hs_Logging)
+      if (this.dice != null)
+        this.dice.sendMsg(new CANPacket(ECULoggingCommands.msgCANRequestRecordSetStop), CANChannel.HS);
+      if (this.logger != null && this.logger.hs_Logging)
         this.logger.recs_req = false;
-      this.logFile.Close();
-      string[] strArray = this.txtLogFile.Text.Split(new string[1]
+      if (this.logFile != null)
       {
-        ".csv"
-      }, StringSplitOptions.None);
-      if (strArray.Length != 0)
-        this.txtLogFile.Text = strArray[0] + "_" + (object) this.numLogSessions + ".csv";
+        this.logFile.Flush();
+        this.logFile.Close();
+        this.logFile = (StreamWriter) null;
+      }
+      if (!this.txtLogFile.Text.Equals(""))
+      {
+        string directoryName = Path.GetDirectoryName(this.txtLogFile.Text);
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(this.txtLogFile.Text);
+        this.txtLogFile.Text = Path.Combine(directoryName, fileNameWithoutExtension + "_" + (object) this.numLogSessions + ".csv");
+      }
       else
         this.txtLogFile.Text = "";
       try
@@ -316,7 +323,8 @@ namespace J2534
       {
         Console.WriteLine(ex.ToString());
       }
-      this.logger.clearReqs();
+      if (this.logger != null)
+        this.logger.clearReqs();
       this.changeButtonState(true);
       this.cmdStopLogging.Enabled = false;
       this.cmdStartLogging.Enabled = true;
@@ -516,6 +524,8 @@ namespace J2534
       }
       catch (Exception ex)
       {
+        Console.WriteLine(ex.ToString());
+        throw;
       }
     }
 
@@ -539,10 +549,12 @@ namespace J2534
         }
         else
         {
+          this.parseParameters();
+          if (this.eVars == null || this.eVars.Count == 0)
+            throw new InvalidOperationException("No variables were loaded from the selected parameters file.");
           this.logger = new ECULogger(this.dice, this.eParams);
           if (!this.p80)
             new DIMComm(this.dice, true).sendMessage("Logging...");
-          this.parseParameters();
           this.logger.sendReqs();
           this.logFile = new StreamWriter(this.txtLogFile.Text, false);
           if (this.eParams.displayTime)
@@ -573,22 +585,33 @@ namespace J2534
     {
       Thread.CurrentThread.CurrentCulture = this.culture;
       Thread.CurrentThread.CurrentUICulture = this.culture;
+      if (this.logger == null || this.logFile == null || this.eVars == null)
+        return;
       string result = "";
       if (!this.logger.requestRecords(ref result))
         return;
       this.processReqs(result);
-      if (this.eParams.displayTime)
-        this.logFile.Write(this.getLogTimeSeconds(true) + ",");
-      foreach (ECUVariable eVar in (List<ECUVariable>) this.eVars)
+      try
       {
-        int num = (int) eVar.value;
-        if (eVar.signed)
-          num = !eVar.word ? (int) (sbyte) eVar.value : (int) (short) eVar.value;
-        double dbValue = (double) num * eVar.factor + eVar.offset;
-        eVar.result = this.logger.getDoublePrecision(dbValue, eVar.precision);
-        this.logFile.Write(eVar.result + ",");
+        if (this.eParams.displayTime)
+          this.logFile.Write(this.getLogTimeSeconds(true) + ",");
+        foreach (ECUVariable eVar in (List<ECUVariable>) this.eVars)
+        {
+          int num = (int) eVar.value;
+          if (eVar.signed)
+            num = !eVar.word ? (int) (sbyte) eVar.value : (int) (short) eVar.value;
+          double dbValue = (double) num * eVar.factor + eVar.offset;
+          eVar.result = this.logger.getDoublePrecision(dbValue, eVar.precision);
+          this.logFile.Write(eVar.result + ",");
+        }
+        this.logFile.WriteLine();
       }
-      this.logFile.WriteLine();
+      catch (Exception ex)
+      {
+        this.logTimer.Stop();
+        Console.WriteLine(ex.ToString());
+        return;
+      }
       this.lblLogTime.Text = "Log Time: " + this.getLogTimeSeconds(false) + "sec";
       if (!this.chkshowvitals.Checked)
         return;
@@ -603,14 +626,16 @@ namespace J2534
         else
           this.vitals_boost.Text = list1[0].result.ToString();
       }
-      this.vitals_lambda.Text = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains("lamsoni_w"))).ToList<ECUVariable>()[0].result.ToString();
+      List<ECUVariable> listLambda = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains("lamsoni_w"))).ToList<ECUVariable>();
+      if (listLambda.Count > 0)
+        this.vitals_lambda.Text = listLambda[0].result.ToString();
       List<ECUVariable> list2 = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains("wkrm"))).ToList<ECUVariable>();
       if (list2.Count > 0)
         this.vitals_retard.Text = list2[0].result.ToString();
-     List<ECUVariable> list4 = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>)(x => x.name.Contains("pistnd_w"))).ToList<ECUVariable>();
-            if (list2.Count > 0)
-                this.vitals_fuelpressure.Text = list4[0].result.ToString();
-            List<ECUVariable> list3 = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains(this.comboBox_xmlparams.SelectedValue.ToString()))).ToList<ECUVariable>();
+      List<ECUVariable> list4 = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains("pistnd_w"))).ToList<ECUVariable>();
+      if (list4.Count > 0)
+        this.vitals_fuelpressure.Text = list4[0].result.ToString();
+      List<ECUVariable> list3 = this.eVars.Where<ECUVariable>((Func<ECUVariable, bool>) (x => x.name.Contains(this.comboBox_xmlparams.SelectedValue.ToString()))).ToList<ECUVariable>();
       if (list3.Count <= 0)
         return;
       this.vitals_custom.Text = list3[0].result.ToString();
@@ -633,7 +658,7 @@ namespace J2534
       }
       catch (Exception ex)
       {
-        ex.ToString();
+        Console.WriteLine(ex.ToString());
       }
     }
 
@@ -861,7 +886,7 @@ namespace J2534
     private void readTimer_Tick(object sender, EventArgs e)
     {
       this.lblTime.Text = "Read Time: " + this.flashTime.ToString();
-      lock (new object())
+      lock (this.progressStateLock)
       {
         this.progressFlash.Value = this.flashTime > this.progressFlash.Maximum ? this.progressFlash.Maximum : this.flashTime;
         if (this.eProg.doneFlashing)
@@ -1484,7 +1509,7 @@ namespace J2534
             // 
             // logTimer
             // 
-            this.logTimer.Interval = 1;
+            this.logTimer.Interval = 50;
             this.logTimer.Tick += new System.EventHandler(this.logTimer_Tick_1);
             // 
             // cmdDetectDevices
