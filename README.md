@@ -19,12 +19,27 @@ A proper website and fully-functional software with many more features will be a
 
 Fresh builds are dropped randomly in the Volvo Me7 thread on nefmoto
 
-## Building on Linux
+## Building with .NET SDK (Windows)
 
-This is a legacy .NET Framework 4.6.1 WinForms app, so build it with Mono:
+This project now uses an SDK-style WinForms project and can be built with the `dotnet` CLI.
+
+1. Install the .NET 8 SDK on Windows.
+2. Open a terminal in the repository root.
+3. Build:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y mono-devel
-./build.sh
+dotnet build OpenMooseRedux.csproj -c Debug
+```
+
+4. Run:
+
+```bash
+dotnet run --project OpenMooseRedux.csproj -c Debug
+```
+
+## Build helper script (Linux/macOS/Windows with bash)
+
+```bash
+./build.sh          # Debug
+./build.sh Release  # Release
 ```
